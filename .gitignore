@@ -1,0 +1,8 @@
+### VisualStudioCode ###
+.vscode/*
+!.vscode/tasks.json
+!.vscode/extensions.json
+
+/target
+/config_decrypted
+/config_encrypted
