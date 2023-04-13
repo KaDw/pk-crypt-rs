@@ -1,17 +1,16 @@
 use clap::{Parser, ValueEnum};
-use std::fmt::Display;
-use std::io;
-use std::path::Path;
-use std::str;
-use std::{fs, fs::File, io::Read, io::Write};
+use std::{
+    ffi::OsStr, fmt::Display, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command,
+    str,
+};
 
 // beginning of Quest.dat always starts with ";example"
 // static DECRYPTED_SECRET_TEXT: &'static str = ";example";
 static DECODE_TABLE: [u8; include_bytes!("decode_table.bin").len()] =
     *include_bytes!("decode_table.bin");
 
-// static ENCODE_TABLE: [u8; include_bytes!("encode_table.bin").len()] =
-//     *include_bytes!("encode_table.bin");
+static ENCODE_TABLE: [u8; include_bytes!("encode_table.bin").len()] =
+    *include_bytes!("encode_table.bin");
 /// Utility to encrypt/decrypt .pk files
 #[derive(Parser)]
 #[command(author = "KaDw", version, about, long_about = None)]
@@ -22,8 +21,8 @@ struct Cli {
     /// Xor decrypt/encrypt key (in hex)
     #[arg(short, long, default_value_t = 0x2F)]
     xor: u8,
-    /// File to decrypt/encrypt
-    #[arg(short, long, required = true, default_value_t = String::from("config.pk"))]
+    /// File to be decrypted/encrypted. In encrypted mode files are expected to present in{filename}_encrypted
+    #[arg(short, long, default_value_t = String::from("config.pk"))]
     file: String,
     #[arg(value_enum)]
     mode: Mode,
@@ -68,8 +67,64 @@ impl From<zip::result::InvalidPassword> for DecryptEncryptError {
     }
 }
 
+fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
+    let name = fname.split(".").next().unwrap_or("");
+    let decrypted_path_str = format!("{name}_decrypted");
+    let decrypted_path = Path::new(&decrypted_path_str);
+
+    if !decrypted_path.exists() {
+        println!("{} doesn't exist. No files to decrpt!", decrypted_path_str);
+    }
+    println!("{} found...", decrypted_path_str);
+    let encrypted_path_str = format!("{name}_encrypted");
+    let encrypted_path = Path::new(&encrypted_path_str);
+    fs::create_dir_all(encrypted_path)?;
+    let paths = fs::read_dir(decrypted_path)?;
+    for path in paths {
+        let p = path?.path(); // convert DirEntry to path
+        if p.extension().and_then(OsStr::to_str) == Some("dat") {
+            let mut infile = File::open(&p)?;
+            let f_size = match infile.metadata() {
+                Ok(n) => n.len() as usize,
+                Err(e) => return Err(DecryptEncryptError::Io(e)),
+            };
+            let mut vec: Vec<u8> = Vec::with_capacity(f_size);
+            infile.read_to_end(&mut vec)?;
+            vec = vec
+                .iter_mut()
+                .map(|d| ENCODE_TABLE[256_usize * xor as usize + *d as usize])
+                .collect();
+            let mut outfile = File::create(&encrypted_path.join(&p.file_name().unwrap()))?;
+            outfile.write(&vec)?;
+        } else {
+            fs::copy(&p, &encrypted_path.join(p.file_name().unwrap()))?;
+        }
+    }
+    fs::copy(decrypted_path.join("pkzipc.exe"), "pkzipc.exe")?;
+    let encrypted_path_str = encrypted_path.to_str().unwrap();
+    println!("Executing pkzipc.exe...");
+    Command::new("wine")
+        .args([
+            format!("{encrypted_path_str}/pkzipc.exe").as_str(),
+            "-add",
+            "-lev=5",
+            "-over=all",
+            "-silent",
+            format!("-pass={password}").as_str(),
+            fname,
+            format!("{encrypted_path_str}/*").as_str(),
+        ])
+        .output()?;
+    fs::remove_file("pkzipc.exe")?;
+    fs::remove_dir_all(encrypted_path)?;
+    fs::rename(format!("{fname}.zip"), fname)?;
+    Ok(())
+}
+
 fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
-    let extract_path = Path::new("config_decrypted");
+    let name = fname.split(".").next().unwrap_or("");
+    let extract_path_str = format!("{name}_decrypted");
+    let extract_path = Path::new(&extract_path_str);
     fs::create_dir_all(extract_path).expect("Failed to create");
     let file = File::open(Path::new(fname))?;
 
@@ -112,12 +167,20 @@ fn main() {
 
     match cli.mode {
         Mode::Encrypt => {
-            println!("Encrypt file {}", cli.file);
+            println!("Encrypting {}...", cli.file);
+            match encrypt(&cli.file, &cli.password, cli.xor) {
+                Ok(_) => {
+                    println!("Successfully encrypted {}", cli.file);
+                }
+                Err(e) => println!("{:?}", e),
+            }
         }
         Mode::Decrypt => {
             println!("Extracting and decrypting {}...", &cli.file);
             match decrypt(&cli.file, &cli.password, cli.xor) {
-                Ok(_) => {}
+                Ok(_) => {
+                    println!("Successfully decrypted {}", cli.file);
+                }
                 Err(e) => println!("{:?}", e),
             }
         }

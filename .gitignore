@@ -4,5 +4,7 @@
 !.vscode/extensions.json
 
 /target
-/config_decrypted
-/config_encrypted
+/*_decrypted
+/*_encrypted
+*.exe
+*.pk
