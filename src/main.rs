@@ -1,7 +1,6 @@
 use clap::{Parser, ValueEnum};
 use std::{
-    ffi::OsStr, fmt::Display, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command,
-    str,
+    ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command, str,
 };
 
 // beginning of Quest.dat always starts with ";example"
@@ -21,7 +20,7 @@ struct Cli {
     /// Xor decrypt/encrypt key (in hex)
     #[arg(short, long, default_value_t = 0x2F)]
     xor: u8,
-    /// File to be decrypted/encrypted. In encrypted mode files are expected to present in{filename}_encrypted
+    /// File to be decrypted/encrypted. Files will be decrypted to {filename}_decrypted. The same folder is used as input in encrypt mode
     #[arg(short, long, default_value_t = String::from("config.pk"))]
     file: String,
     #[arg(value_enum)]
@@ -36,21 +35,24 @@ enum Mode {
     Decrypt,
 }
 
-#[derive(Debug)]
 enum DecryptEncryptError {
-    Io(io::Error),
+    Io(std::io::Error),
     Zip(zip::result::ZipError),
     ZipInvalidPassword(zip::result::InvalidPassword),
 }
 
-impl Display for DecryptEncryptError {
+impl fmt::Display for DecryptEncryptError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            DecryptEncryptError::Io(err) => write!(f, "{}", err),
+            DecryptEncryptError::Zip(err) => write!(f, "{}", err),
+            DecryptEncryptError::ZipInvalidPassword(err) => write!(f, "{}", err),
+        }
     }
 }
 
 impl From<io::Error> for DecryptEncryptError {
-    fn from(error: io::Error) -> Self {
+    fn from(error: std::io::Error) -> Self {
         DecryptEncryptError::Io(error)
     }
 }
@@ -68,7 +70,7 @@ impl From<zip::result::InvalidPassword> for DecryptEncryptError {
 }
 
 fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
-    let name = fname.split(".").next().unwrap_or("");
+    let name = fname.split('.').next().unwrap_or("");
     let decrypted_path_str = format!("{name}_decrypted");
     let decrypted_path = Path::new(&decrypted_path_str);
 
@@ -94,8 +96,8 @@ fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
                 .iter_mut()
                 .map(|d| ENCODE_TABLE[256_usize * xor as usize + *d as usize])
                 .collect();
-            let mut outfile = File::create(&encrypted_path.join(&p.file_name().unwrap()))?;
-            outfile.write(&vec)?;
+            let mut outfile = File::create(&encrypted_path.join(p.file_name().unwrap()))?;
+            outfile.write_all(&vec)?;
         } else {
             fs::copy(&p, &encrypted_path.join(p.file_name().unwrap()))?;
         }
@@ -122,7 +124,7 @@ fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
 }
 
 fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
-    let name = fname.split(".").next().unwrap_or("");
+    let name = fname.split('.').next().unwrap_or("");
     let extract_path_str = format!("{name}_decrypted");
     let extract_path = Path::new(&extract_path_str);
     fs::create_dir_all(extract_path).expect("Failed to create");
@@ -134,7 +136,7 @@ fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
     for i in 0..archive.len() {
         let mut ufile = archive.by_index_decrypt(i, password.as_bytes())??;
         let outpath = match ufile.enclosed_name() {
-            Some(p) => extract_path.join(p.to_owned()),
+            Some(p) => extract_path.join(p),
             None => continue,
         };
         if (*ufile.name()).ends_with('/') {
@@ -153,7 +155,7 @@ fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
                     .iter_mut()
                     .map(|d| DECODE_TABLE[256_usize * xor as usize + *d as usize])
                     .collect();
-                outfile.write(&vec)?;
+                outfile.write_all(&vec)?;
             } else {
                 io::copy(&mut ufile, &mut outfile)?;
             }
@@ -172,7 +174,7 @@ fn main() {
                 Ok(_) => {
                     println!("Successfully encrypted {}", cli.file);
                 }
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
         Mode::Decrypt => {
@@ -181,7 +183,7 @@ fn main() {
                 Ok(_) => {
                     println!("Successfully decrypted {}", cli.file);
                 }
-                Err(e) => println!("{:?}", e),
+                Err(e) => println!("{}", e),
             }
         }
     }
