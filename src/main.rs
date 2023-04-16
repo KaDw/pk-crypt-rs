@@ -2,8 +2,9 @@ use clap::{Parser, ValueEnum};
 use std::{
     ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command, str,
 };
+use zip::read::ZipFile;
 
-// beginning of Quest.dat always starts with ";example"
+// beginning of Quest.dat always starts with ";example", using this info we can crack XOR key
 // static DECRYPTED_SECRET_TEXT: &'static str = ";example";
 static DECODE_TABLE: [u8; include_bytes!("decode_table.bin").len()] =
     *include_bytes!("decode_table.bin");
@@ -27,7 +28,7 @@ struct Cli {
     mode: Mode,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Copy, Clone, ValueEnum)]
 enum Mode {
     /// Encrypt .pk file
     Encrypt,
@@ -69,8 +70,42 @@ impl From<zip::result::InvalidPassword> for DecryptEncryptError {
     }
 }
 
+fn encode_file(
+    in_file: &mut File,
+    out_file: &mut File,
+    xor: u8,
+) -> Result<(), DecryptEncryptError> {
+    let f_size = match in_file.metadata() {
+        Ok(n) => n.len() as usize,
+        Err(e) => return Err(DecryptEncryptError::Io(e)),
+    };
+    let mut vec: Vec<u8> = Vec::with_capacity(f_size);
+    in_file.read_to_end(&mut vec)?;
+    vec = vec
+        .iter_mut()
+        .map(|d| ENCODE_TABLE[256_usize * xor as usize + *d as usize])
+        .collect();
+    out_file.write_all(&vec)?;
+    Ok(())
+}
+
+fn decode_file(
+    in_file: &mut ZipFile,
+    out_file: &mut File,
+    xor: u8,
+) -> Result<(), DecryptEncryptError> {
+    let mut vec: Vec<u8> = Vec::with_capacity(in_file.size() as usize);
+    in_file.read_to_end(&mut vec)?;
+    vec = vec
+        .iter_mut()
+        .map(|d| DECODE_TABLE[256_usize * xor as usize + *d as usize])
+        .collect();
+    out_file.write_all(&vec)?;
+    Ok(())
+}
+
 fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
-    let name = fname.split('.').next().unwrap_or("");
+    let name = fname.split('.').next().unwrap_or(""); // get filename without extension
     let decrypted_path_str = format!("{name}_decrypted");
     let decrypted_path = Path::new(&decrypted_path_str);
 
@@ -85,19 +120,10 @@ fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
     for path in paths {
         let p = path?.path(); // convert DirEntry to path
         if p.extension().and_then(OsStr::to_str) == Some("dat") {
-            let mut infile = File::open(&p)?;
-            let f_size = match infile.metadata() {
-                Ok(n) => n.len() as usize,
-                Err(e) => return Err(DecryptEncryptError::Io(e)),
-            };
-            let mut vec: Vec<u8> = Vec::with_capacity(f_size);
-            infile.read_to_end(&mut vec)?;
-            vec = vec
-                .iter_mut()
-                .map(|d| ENCODE_TABLE[256_usize * xor as usize + *d as usize])
-                .collect();
-            let mut outfile = File::create(&encrypted_path.join(p.file_name().unwrap()))?;
-            outfile.write_all(&vec)?;
+            let mut in_file = File::open(decrypted_path)?;
+            let mut out_file =
+                File::create(&encrypted_path.join(decrypted_path.file_name().unwrap()))?;
+            encode_file(&mut in_file, &mut out_file, xor)?;
         } else {
             fs::copy(&p, &encrypted_path.join(p.file_name().unwrap()))?;
         }
@@ -147,17 +173,11 @@ fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
                     fs::create_dir_all(p)?;
                 }
             }
-            let mut outfile = File::create(&outpath)?;
+            let mut out_file = File::create(&outpath)?;
             if (*ufile.name()).ends_with(".dat") {
-                let mut vec: Vec<u8> = Vec::with_capacity(ufile.size() as usize);
-                ufile.read_to_end(&mut vec)?;
-                vec = vec
-                    .iter_mut()
-                    .map(|d| DECODE_TABLE[256_usize * xor as usize + *d as usize])
-                    .collect();
-                outfile.write_all(&vec)?;
+                decode_file(&mut ufile, &mut out_file, xor)?;
             } else {
-                io::copy(&mut ufile, &mut outfile)?;
+                io::copy(&mut ufile, &mut out_file)?;
             }
         }
     }
