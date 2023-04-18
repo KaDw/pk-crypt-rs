@@ -1,4 +1,4 @@
-use clap::{Parser, ValueEnum};
+use clap::{value_parser, Parser, ValueEnum};
 use std::{
     ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command, str, vec,
 };
@@ -13,6 +13,7 @@ static DECODE_TABLE: [u8; include_bytes!("decode_table.bin").len()] =
 /// lookup array used for encoding .dat files
 static ENCODE_TABLE: [u8; include_bytes!("encode_table.bin").len()] =
     *include_bytes!("encode_table.bin");
+static XOR_KEY_MAX_VAL: i64 = ((DECODE_TABLE.len() - u8::MAX as usize) / u8::MAX as usize) as i64;
 
 /// Utility to encrypt/decrypt .pk files
 #[derive(Parser)]
@@ -21,8 +22,8 @@ struct Cli {
     /// .pk password
     #[arg(short, long, default_value_t = String::from("EV)O8@BL$3O2E"))]
     password: String,
-    /// Xor decrypt/encrypt key (in hex)
-    #[arg(short, long, default_value_t = 0x2F)]
+    /// Xor decrypt/encrypt key (decimal), range of this value is dependent on DECRYPT/ENCRYPT lookup tables
+    #[arg(short, long, value_parser(value_parser!(u8).range(..XOR_KEY_MAX_VAL)), default_value_t = 0x2F)]
     xor: u8,
     /// File to be decrypted/encrypted. Files will be decrypted to {filename}_decrypted. The same folder is used as input in encrypt mode
     #[arg(short, long, default_value_t = String::from("config.pk"))]
@@ -104,9 +105,7 @@ fn check_xor_key(data: &[u8], xor: u8) -> bool {
 /// Returns:
 /// XOR key or None if cracking didn't succeed
 fn crack_xor_key(data: &[u8]) -> Option<u8> {
-    let mut xor: u8 = 0;
-    // TODO: handle this properly, check bounds
-    for _ in 0..99 {
+    for xor in 0..XOR_KEY_MAX_VAL as u8 {
         let decoded_vec: Vec<u8> = data
             .iter()
             .map(|d| DECODE_TABLE[256_usize * xor as usize + *d as usize])
@@ -115,7 +114,6 @@ fn crack_xor_key(data: &[u8]) -> Option<u8> {
         if s == DECRYPTED_SECRET_TEXT {
             return Some(xor);
         }
-        xor += 1;
     }
     None
 }
