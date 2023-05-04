@@ -4,6 +4,8 @@
 
 CLI tool to decrypt and encrypt `.pk` files that are part of configuration files for KalOnline game.
 
+[You can find latest release for Windows and Linux here](https://github.com/KaDw/pk-crypt-rs/releases/latest)
+
 ## Usage
 
 `pk-crypt [OPTIONS] <MODE>`
