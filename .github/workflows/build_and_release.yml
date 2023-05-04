@@ -1,0 +1,27 @@
+name: build_and_release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: checkout
+      uses: actions/checkout@v3
+    - name: build
+      run: cargo build --release
+    - name: release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          target/release/pk-crypt
+          target/release/pk-crypt.exe
