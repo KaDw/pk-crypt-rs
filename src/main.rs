@@ -1,4 +1,5 @@
-use clap::{value_parser, Parser, ValueEnum};
+use clap::{value_parser, Args, Parser, ValueEnum};
+use hex;
 use std::{ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Seek, io::Write, path::Path, str, vec};
 use zip::read::ZipFile;
 use zip::unstable::write::FileOptionsExt;
@@ -17,11 +18,10 @@ static XOR_KEY_MAX_VAL: i64 = ((DECODE_TABLE.len() - u8::MAX as usize) / u8::MAX
 
 /// Utility to encrypt/decrypt .pk files
 #[derive(Parser)]
-#[command(author = "KaDw", version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Cli {
-    /// .pk password
-    #[arg(short, long, default_value_t = String::from("EV)O8@BL$3O2E"))]
-    password: String,
+    #[command(flatten)]
+    password: PasswordType,
     /// Xor decrypt/encrypt key (decimal), range of this value is dependent on DECRYPT/ENCRYPT lookup tables
     #[arg(short, long, value_parser(value_parser!(u8).range(..XOR_KEY_MAX_VAL)), default_value_t = 0x2F)]
     xor: u8,
@@ -30,6 +30,17 @@ struct Cli {
     file: String,
     #[arg(value_enum)]
     mode: Mode,
+}
+
+#[derive(Args)]
+#[group(required(true), multiple(false))]
+struct PasswordType {
+    /// .pk password (UTF-8)
+    #[arg(short, long)]
+    password_text: Option<String>,
+    /// .pk password as bytes, use hex format, eg. "pass" is equal to "70617373"
+    #[arg(long)]
+    password_bytes: Option<String>,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -80,9 +91,9 @@ impl From<zip::result::InvalidPassword> for DecryptEncryptError {
 ///
 /// Returns:
 /// Vector of bytes of size equal to secret length or error if something went wrong
-fn get_secret_piece(file: &File, password: &str) -> Result<Vec<u8>, DecryptEncryptError> {
+fn get_secret_piece(file: &File, password: &[u8]) -> Result<Vec<u8>, DecryptEncryptError> {
     let mut archive = zip::ZipArchive::new(file)?;
-    let mut ufile = archive.by_name_decrypt(DECRYPTED_SECRET_FILE, password.as_bytes())??;
+    let mut ufile = archive.by_name_decrypt(DECRYPTED_SECRET_FILE, password)??;
     let mut vec: Vec<u8> = vec![0; DECRYPTED_SECRET_TEXT.len()];
     ufile.read_exact(&mut vec)?;
     Ok(vec)
@@ -158,7 +169,7 @@ fn zip_flat_dir<T>(
     dir: &str,
     writer: T,
     method: zip::CompressionMethod,
-    password: &str,
+    password: &[u8],
 ) -> zip::result::ZipResult<()>
 where
     T: Write + Seek,
@@ -168,7 +179,7 @@ where
     let mut zip = zip::ZipWriter::new(writer);
     let options = FileOptions::default()
         .compression_method(method)
-        .with_deprecated_encryption(password.as_bytes());
+        .with_deprecated_encryption(password);
 
     let mut buffer = Vec::new();
     for entry in fs::read_dir(encrypted_path)? {
@@ -191,7 +202,7 @@ where
 /// Encrypt files:
 /// 1. Encode files using lookup table and XOR
 /// 2. Zip it using pkzip.exe, use wine on linux version
-fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
+fn encrypt(fname: &str, password: &[u8], xor: u8) -> Result<(), DecryptEncryptError> {
     let fname_no_ext = fname.split('.').next().unwrap_or(""); // get filename without extension
     let decrypted_path_str = format!("{fname_no_ext}_decrypted");
     let decrypted_path = Path::new(&decrypted_path_str);
@@ -214,6 +225,7 @@ fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
         }
     }
 
+    println!("Files encoded, zipping...");
     zip_flat_dir(
         &encrypted_path_str,
         File::create(Path::new(&fname))?,
@@ -228,7 +240,7 @@ fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
 /// Decrypt files:
 /// 1. Unzip .pk file
 /// 2. Decode files using lookup table and XOR
-fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
+fn decrypt(fname: &str, password: &[u8], xor: u8) -> Result<(), DecryptEncryptError> {
     let name = fname.split('.').next().unwrap_or("");
     let extract_path_str = format!("{name}_decrypted");
     let extract_path = Path::new(&extract_path_str);
@@ -248,7 +260,7 @@ fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
     let dat_files = archive.file_names().filter(|x| x.ends_with(".dat")).count();
     println!("Found {} .dat files", dat_files);
     for i in 0..archive.len() {
-        let mut ufile = archive.by_index_decrypt(i, password.as_bytes())??;
+        let mut ufile = archive.by_index_decrypt(i, password)??;
         let outpath = match ufile.enclosed_name() {
             Some(p) => extract_path.join(p),
             None => continue,
@@ -275,23 +287,42 @@ fn decrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptErr
 fn main() {
     let cli = Cli::parse();
 
+    let passwords = &cli.password;
+    let password: Vec<u8> = if let Some(_) = passwords.password_text {
+        passwords
+            .password_text
+            .as_ref()
+            .unwrap()
+            .as_bytes()
+            .to_owned()
+    } else {
+        match hex::decode(passwords.password_bytes.as_ref().unwrap()) {
+            Ok(vec) => vec,
+            Err(e) => {
+                println!("Error during hex password parsing: {}", e);
+                return;
+            }
+        }
+    };
+
     match cli.mode {
         Mode::Encrypt => {
             println!("Encrypting {}...", cli.file);
-            match encrypt(&cli.file, &cli.password, cli.xor) {
+            match encrypt(&cli.file, &password, cli.xor) {
                 Ok(_) => {
                     println!("Successfully encrypted {}", &cli.file);
                 }
-                Err(e) => println!("{}", e),
+                Err(e) => println!("Encryption error: {}", e),
             }
         }
         Mode::Decrypt => {
-            println!("Extracting and decrypting {}...", &cli.file);
-            match decrypt(&cli.file, &cli.password, cli.xor) {
+            println!("Decrypting {}...", &cli.file);
+
+            match decrypt(&cli.file, &password, cli.xor) {
                 Ok(_) => {
                     println!("Successfully decrypted {}", &cli.file);
                 }
-                Err(e) => println!("{}", e),
+                Err(e) => println!("Decryption error: {}", e),
             }
         }
     }
