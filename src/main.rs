@@ -1,8 +1,8 @@
 use clap::{value_parser, Parser, ValueEnum};
-use std::{
-    ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Write, path::Path, process::Command, str, vec,
-};
+use std::{ffi::OsStr, fmt, fs, fs::File, io, io::Read, io::Seek, io::Write, path::Path, str, vec};
 use zip::read::ZipFile;
+use zip::unstable::write::FileOptionsExt;
+use zip::write::FileOptions;
 
 /// beginning of Quest.dat always starts with ";example", using this info we can crack XOR key
 static DECRYPTED_SECRET_TEXT: &str = ";example";
@@ -154,68 +154,74 @@ fn decode_file(
     Ok(())
 }
 
+fn zip_flat_dir<T>(
+    dir: &str,
+    writer: T,
+    method: zip::CompressionMethod,
+    password: &str,
+) -> zip::result::ZipResult<()>
+where
+    T: Write + Seek,
+{
+    let encrypted_path = Path::new(&dir);
+
+    let mut zip = zip::ZipWriter::new(writer);
+    let options = FileOptions::default()
+        .compression_method(method)
+        .with_deprecated_encryption(password.as_bytes());
+
+    let mut buffer = Vec::new();
+    for entry in fs::read_dir(encrypted_path)? {
+        let path = entry?.path();
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+        if path.is_file() {
+            zip.start_file(&file_name, options)?;
+            let mut f = File::open(path)?;
+
+            f.read_to_end(&mut buffer)?;
+            zip.write_all(&buffer)?;
+            buffer.clear();
+        }
+    }
+    zip.finish()?;
+    Result::Ok(())
+}
+
 /// Encrypt files:
 /// 1. Encode files using lookup table and XOR
 /// 2. Zip it using pkzip.exe, use wine on linux version
 fn encrypt(fname: &str, password: &str, xor: u8) -> Result<(), DecryptEncryptError> {
-    let name = fname.split('.').next().unwrap_or(""); // get filename without extension
-    let decrypted_path_str = format!("{name}_decrypted");
+    let fname_no_ext = fname.split('.').next().unwrap_or(""); // get filename without extension
+    let decrypted_path_str = format!("{fname_no_ext}_decrypted");
     let decrypted_path = Path::new(&decrypted_path_str);
 
     if !decrypted_path.exists() {
         println!("{} doesn't exist. No files to decrpt!", decrypted_path_str);
     }
     println!("{} found...", decrypted_path_str);
-    let encrypted_path_str = format!("{name}_encrypted");
+    let encrypted_path_str = format!("{fname_no_ext}_encrypted");
     let encrypted_path = Path::new(&encrypted_path_str);
     fs::create_dir_all(encrypted_path)?;
-    let paths = fs::read_dir(decrypted_path)?;
-    for path in paths {
-        let p = path?.path(); // convert DirEntry to path
-        if p.extension().and_then(OsStr::to_str) == Some("dat") {
-            let mut in_file = File::open(&p)?;
-            let mut out_file = File::create(&encrypted_path.join(&p.file_name().unwrap()))?;
+    for entry in fs::read_dir(decrypted_path)? {
+        let path = entry?.path(); // convert DirEntry to path
+        if path.extension().and_then(OsStr::to_str) == Some("dat") {
+            let mut in_file = File::open(&path)?;
+            let mut out_file = File::create(&encrypted_path.join(path.file_name().unwrap()))?;
             encode_file(&mut in_file, &mut out_file, xor)?;
         } else {
-            fs::copy(&p, &encrypted_path.join(p.file_name().unwrap()))?;
+            fs::copy(&path, &encrypted_path.join(path.file_name().unwrap()))?;
         }
     }
-    fs::copy(decrypted_path.join("pkzipc.exe"), "pkzipc.exe")?;
-    let encrypted_path_str = encrypted_path.to_str().unwrap();
-    println!("Executing pkzipc.exe...");
-    #[cfg(any(target_os = "windows"))]
-    {
-        Command::new(format!("{encrypted_path_str}/pkzipc.exe").as_str())
-            .args([
-                "-add",
-                "-lev=5",
-                "-over=all",
-                "-silent",
-                format!("-pass={password}").as_str(),
-                fname,
-                format!("{encrypted_path_str}/*").as_str(),
-            ])
-            .output()?;
-    }
-    #[cfg(any(target_os = "linux"))]
-    {
-        // pkzip is a windows executable, use wine on linux
-        Command::new("wine")
-            .args([
-                format!("{encrypted_path_str}/pkzipc.exe").as_str(),
-                "-add",
-                "-lev=5",
-                "-over=all",
-                "-silent",
-                format!("-pass={password}").as_str(),
-                fname,
-                format!("{encrypted_path_str}/*").as_str(),
-            ])
-            .output()?;
-    }
-    fs::remove_file("pkzipc.exe")?;
+
+    zip_flat_dir(
+        &encrypted_path_str,
+        File::create(Path::new(&fname))?,
+        zip::CompressionMethod::Deflated,
+        password,
+    )?;
+
     fs::remove_dir_all(encrypted_path)?;
-    fs::rename(format!("{fname}.zip"), fname)?;
     Ok(())
 }
 
