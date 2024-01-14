@@ -12,9 +12,9 @@ CLI tool to decrypt and encrypt `.pk` files that are part of configuration files
 
 To `decrypt` the input file `config.pk` to the output directory `config_decrypted` 3 things are required:
 
-1. Password also known as pk password.
-2. Table what encrpytion table to use, `new` or `old`.
-3. XOR key, it can be also recovered if user knows plaintext that is stored in a file
+1. Pk password
+2. Table - selected between `new` or `old`.
+3. XOR key - after unzipping the file with the correct password it has to be decoded. For this process the XOR key and table is required
 
 #### Decrypt with known XOR key
 
@@ -24,13 +24,13 @@ To decrypt using XOR key simply supply it using `-x` flag:
 
 #### Decrypt and recover XOR key
 
-Usually the XOR key is something not widely known. Key can be recovered only if plainfile wiht the known plaintext is supplied. To do so, use  `-F` followed by the filename (eg. `"TrainingCenter.dat"`) and  `-T` followed by plaintext that the file starts with (eg. `"<?xml version="`):
+Usually the XOR key is something not widely known. Key can be recovered only if file wiht the known plaintext is supplied. To do so, use  `-F` followed by the filename (eg. `"TrainingCenter.dat"`) and  `-T` followed by plaintext that the file starts with (eg. `"<?xml version="`):
 
 `pk-crypt.exe decrypt -i config.pk -o config_decrypted -p password -t new -F "TrainingCenter.dat" -T "<?xml version="`
 
 After succesfull recovery the key will be printed as decimal value.
 
-```
+```text
 Xor key recovered: 93
 Decrypting config_org.pk to config_decrypted
 Found 72 .dat files
@@ -76,7 +76,7 @@ Since this tool doesn't have any integrated editor you can use any editor you li
 
 Here is the example config that you must add to .vscode/tasks.json in order to have encrypt and decrypt tasks available under the `Tasks: Run Task`
 
-```
+```json
 {
     // See https://go.microsoft.com/fwlink/?LinkId=733558
     // for the documentation about the tasks.json format
@@ -127,3 +127,9 @@ Here is the example config that you must add to .vscode/tasks.json in order to h
     ]
 }
 ```
+
+### FAQ
+
+1. My files are unzipped but when I open them I see garbage
+
+Most probably the files weren't properly decoded. Table or XOR key are not correct, see [Decrypt and recover XOR key](#decrypt-and-recover-xor-key)
