@@ -1,3 +1,25 @@
+# CHANEGLOG
+
+## v0.3.0 (2024-01-14)
+
+### Features
+
+* support new encryption table ([b484303](https://github.com/KaDw/pk-crypt-rs/commit/b484303))
+* xor bruteforce plaintext is now supplied by the user ([b484303](https://github.com/KaDw/pk-crypt-rs/commit/b484303))
+
+### Fix
+
+* Remove decrypt validation. It was done by reading hardcoded phrase from a file, it happened that the file could be empty. ([b484303](https://github.com/KaDw/pk-crypt-rs/commit/b484303)). Thanks to Ryuk for reporting this
+
+### Refactor
+
+* decrypt and encrypt are now part of PkCrypt impl ([b484303](https://github.com/KaDw/pk-crypt-rs/commit/b484303))
+* new readme, add section about vscode ([56014e4](https://github.com/KaDw/pk-crypt-rs/commit/56014e4))
+
+### BREAKING CHANGE
+
+* removed -f option, specify -i and -o instead ([b484303](https://github.com/KaDw/pk-crypt-rs/commit/b484303))
+
 ## v0.2.0 (2023-05-07)
 
 ### Features

@@ -8,42 +8,122 @@ CLI tool to decrypt and encrypt `.pk` files that are part of configuration files
 
 ## Usage
 
-`pk-crypt [OPTIONS] <MODE>`
-
-### Options
-
-* -p, --password_text <PASSWORD_TEXT> - .pk password, UTF-8 encoding
-* --password-bytes <PASSWORD_BYTES> - .pk password as bytes, use hex format, eg. "pass" in UTF-8 is equal to "70617373"
-* -x, --xor <XOR> - Xor decrypt/encrypt key (decimal), range of this value is dependent on DECRYPT/ENCRYPT lookup tables [default: `47`]
-* -f, --file <FILE> - File to be decrypted/encrypted. Files will be decrypted to {filename}_decrypted. The same folder is used as input in encrypt mode [default: `config.pk`]
-* -h, --help - Print help (see a summary with '-h')
-* -V, --version - Print version
-
-### Modes
-
-* decrypt
-* encrypt
-
-## Example usage
-
 ### Decrypt
 
-`pk-cypt.exe decrypt -f config.pk -p abcd1234 -x 45`
+To `decrypt` the input file `config.pk` to the output directory `config_decrypted` 3 things are required:
 
-Decrypted config will be stored in `{filename}_decrypted`, in this case `config_decrypted`
+1. Password also known as pk password.
+2. Table what encrpytion table to use, `new` or `old`.
+3. XOR key, it can be also recovered if user knows plaintext that is stored in a file
+
+#### Decrypt with known XOR key
+
+To decrypt using XOR key simply supply it using `-x` flag:
+
+`pk-crypt.exe decrypt -i config.pk -o config_decrypted -p password -t new -x 45`
+
+#### Decrypt and recover XOR key
+
+Usually the XOR key is something not widely known. Key can be recovered only if plainfile wiht the known plaintext is supplied. To do so, use  `-F` followed by the filename (eg. `"TrainingCenter.dat"`) and  `-T` followed by plaintext that the file starts with (eg. `"<?xml version="`):
+
+`pk-crypt.exe decrypt -i config.pk -o config_decrypted -p password -t new -F "TrainingCenter.dat" -T "<?xml version="`
+
+After succesfull recovery the key will be printed as decimal value.
+
+```
+Xor key recovered: 93
+Decrypting config_org.pk to config_decrypted
+Found 72 .dat files
+Successfully decrypted config_decrypted
+```
+
+Try to use different encryption table if recovery failed.
+
+From now on it might be more convinient to use XOR key itself.
 
 ### Encrypt
 
-`pk-cypt.exe encrypt -f config.pk -p abcd1234 -x 45`
+In encryption mode all 3 arguments, (password, table, xor key) specific to `.pk` file have to be supplied.
 
-In this mode pk-crypt will look for `{filename}_decrypted` (config decrypted in this example) directory and create `config.pk` out of it
+To `encrypt` the input directory `config_decrypted` to the output file `new_config.pk` use:
 
-### Password as bytes
+`pk-crypt.exe encrypt -i config_decrypted -o new_config.pk -p password -t new -x 45`
 
-`pk-cypt.exe encrypt -f config.pk --password-bytes 70C47373 -x 45`
+### Password representation
 
-Under the hood unzip and zip functions use byte representation, not a string.
+Let's assume we want to decrypt the file with password `pÄss`. Special characters (like `Ä`) might be encoded differently depeding on the character encoding. pk-crypt by default uses UTF-8 encoding and `pÄss` [UTF-8 byte representation](https://dencode.com/string/hex?v=p%C3%84ss&oe=UTF-8&nl=crlf&separator-each=1B&case=upper) is `0x70 0xC3 0xA4 0x73 0x73`. If someone used [Windows-1252 encoded](https://dencode.com/string/hex?v=p%C3%84ss&oe=windows-1252&nl=crlf&separator-each=1B&case=upper) password it's byte representation is `0x70, 0xC4, 0x73, 0x73`. Those are two completely different passwords!
 
-In this example pk-crypt will encrypt file using `0x70, 0xC4, 0x73, 0x73`  which is equivalent to text `pÄss` in Windows-1252 encoding.
+Because under the hood unzip and zip functions use byte representation, not a string, in both `decrypt` or `encrypt` mode password can be supplied in two ways:
 
-Now let's assume we want to decrypt the file using `--password-text pÄss`. It won't work since by default UTF-8 encoding is used and `pÄss` UTF-8 byte representation is `0x70 0xC3 0xA4 0x73 0x73`. This are two completely different passwords!
+#### As text, UTF-8 encoded
+
+The usual way:
+`pk-crypt.exe decrypt -i config.pk -o config_decrypted --password-text pÄss -t new -x 45`
+
+#### As bytes
+
+In this example `pÄss` is supplied in Windows-1252 encoding:
+`pk-crypt.exe decrypt -i config.pk -o config_decrypted --password-bytes 70C47373 -t new -x 45`
+
+### Visual Studio Code integration
+
+Since this tool doesn't have any integrated editor you can use any editor you like. Visual Studio Code has a great feature - [tasks](https://code.visualstudio.com/docs/editor/tasks). It allows you to automate the whole process. To decrypt or encrypt follow this steps:
+
+1. Ctrl + Shift + P
+2. Type run and look for `Tasks: Run Task`
+3. Select `encrypt` or `decrypt`
+4. Done!
+
+Here is the example config that you must add to .vscode/tasks.json in order to have encrypt and decrypt tasks available under the `Tasks: Run Task`
+
+```
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "decrypt",
+            "type": "process",
+            "options": {
+                "cwd": "${workspaceFolder}",
+            },
+            "command": "pk-crypt",
+            "args": [
+                "decrypt",
+                "-i",
+                "config.pk",
+                "-o",
+                "config_decrypted",
+                "-p",
+                "password",
+                "-t",
+                "new",
+                "-x",
+                "45"
+            ]
+        },
+        {
+            "label": "encrypt",
+            "type": "process",
+            "options": {
+                "cwd": "${workspaceFolder}",
+            },
+            "command": "pk-crypt",
+            "args": [
+                "encrypt",
+                "-i",
+                "config_decrypted",
+                "-o",
+                "new_config.pk",
+                "-p",
+                "password",
+                "-t",
+                "new",
+                "-x",
+                "45"
+            ]
+        },
+    ]
+}
+```
