@@ -31,7 +31,10 @@ Usually the XOR key is something not widely known. Key can be recovered only if 
 After succesfull recovery the key will be printed as decimal value.
 
 ```
-output
+Xor key recovered: 93
+Decrypting config_org.pk to config_decrypted
+Found 72 .dat files
+Successfully decrypted config_decrypted
 ```
 
 Try to use different encryption table if recovery failed.
@@ -61,3 +64,66 @@ The usual way:
 
 In this example `pÄss` is supplied in Windows-1252 encoding:
 `pk-crypt.exe decrypt -i config.pk -o config_decrypted --password-bytes 70C47373 -t new -x 45`
+
+### Visual Studio Code integration
+
+Since this tool doesn't have any integrated editor you can use any editor you like. Visual Studio Code has a great feature - [tasks](https://code.visualstudio.com/docs/editor/tasks). It allows you to automate the whole process. To decrypt or encrypt follow this steps:
+
+1. Ctrl + Shift + P
+2. Type run and look for `Tasks: Run Task`
+3. Select `encrypt` or `decrypt`
+4. Done!
+
+Here is the example config that you must add to .vscode/tasks.json in order to have encrypt and decrypt tasks available under the `Tasks: Run Task`
+
+```
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "decrypt",
+            "type": "process",
+            "options": {
+                "cwd": "${workspaceFolder}",
+            },
+            "command": "pk-crypt",
+            "args": [
+                "decrypt",
+                "-i",
+                "config.pk",
+                "-o",
+                "config_decrypted",
+                "-p",
+                "password",
+                "-t",
+                "new",
+                "-x",
+                "45"
+            ]
+        },
+        {
+            "label": "encrypt",
+            "type": "process",
+            "options": {
+                "cwd": "${workspaceFolder}",
+            },
+            "command": "pk-crypt",
+            "args": [
+                "encrypt",
+                "-i",
+                "config_decrypted",
+                "-o",
+                "new_config.pk",
+                "-p",
+                "password",
+                "-t",
+                "new",
+                "-x",
+                "45"
+            ]
+        },
+    ]
+}
+```
