@@ -1,5 +1,16 @@
 # CHANEGLOG
 
+## v0.3.1 (2024-01-31)
+
+### Build
+
+* Reduce binary size for both linux and windows builds ([4742e6c](https://github.com/KaDw/pk-crypt-rs/commit/4742e6c))
+
+### Docs
+
+* Readme spelling, add faq section ([bec0466](https://github.com/KaDw/pk-crypt-rs/commit/bec0466))
+* Readme spelling and style ([f286e3a](https://github.com/KaDw/pk-crypt-rs/commit/f286e3a))
+
 ## v0.3.0 (2024-01-14)
 
 ### Features
