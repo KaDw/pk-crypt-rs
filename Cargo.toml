@@ -10,3 +10,8 @@ clap = { version = "4.2.1", features = ["derive"] }
 encoding = "0.2.33"
 hex = "0.4.3"
 zip = {version = "0.6.5", features = ["deflate"] }
+
+[profile.release]
+opt-level = 's'     # Optimize for size
+lto = true          # Enable link-time optimization
+strip = true        # Strip symbols from binary
